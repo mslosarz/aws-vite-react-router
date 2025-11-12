@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Stack for SPA hosted on s3 with cloudfront to serve content
+
+Parameters:
+  SpaName:
+    Type: String
+  CachePolicyId:
+    Type: String
+    Default: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+  SpaVersion:
+    Type: String
+    Default: v1
+
+Resources:
+  HostingS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub '${SpaName}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: Suspended
+      WebsiteConfiguration:
+        ErrorDocument: error.html
+        IndexDocument: index.html
+      Tags:
+        - Key: ProjectName
+          Value: !Ref SpaName
+
+  HostingS3Access:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref HostingS3
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource:
+              Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref HostingS3
+                  - '/*'
+
+  SpaDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'Distribution for ${SpaName}'
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: hosting
+            DomainName: !GetAtt HostingS3.RegionalDomainName
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+          - Id: react-spa
+            DomainName: !Select [1, !Split ["//", !GetAtt HostingS3.WebsiteURL]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+          - ErrorCode: 404
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+        DefaultCacheBehavior:
+          CachePolicyId: !Ref CachePolicyId
+          TargetOriginId: hosting
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: ProjectName
+          Value: !Ref SpaName
+
+Outputs:
+  S3Bucket:
+    Description: Bucket name
+    Value: !Ref HostingS3
+    Export:
+      Name: !Sub '${SpaName}-hosting-s3'
+  SiteUrl:
+    Description: Site url
+    Value: !GetAtt SpaDistribution.DomainName
+    Export:
+      Name: !Sub '${SpaName}-site-url'
+  DistributionId:
+    Description: Distribution Id
+    Value: !GetAtt SpaDistribution.Id
+    Export:
+      Name: !Sub '${SpaName}-distribution-id'
